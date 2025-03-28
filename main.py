@@ -1,5 +1,57 @@
 import flet as ft
-import pyautogui, sys, random, asyncio
+import pyautogui, sys, random, asyncio, math
+
+class ResponsiveLayer() :
+    def __init__(self, page: ft.Page, BASE_WIDTH: int = 800, BASE_HEIGHT: int = 600) -> None :
+        self.page: ft.Page = page
+        
+        self.BASE_WIDTH: int = BASE_WIDTH
+        self.BASE_HEIGHT: int = BASE_HEIGHT
+        
+        self.update_dimensions()
+        return
+    
+    def update_dimensions(self) -> None :
+        self.page_width: int = self.page.width
+        self.page_height: int = self.page.height
+        
+        self.width_relativity_factor: int = (0.00001 + (self.page_width / self.BASE_WIDTH))
+        self.height_relativity_factor: int = (0.00001 + (self.page_height / self.BASE_HEIGHT))
+        
+        self.pw = lambda percentage, _min = 0, width = self.page_width: result if (result := ((percentage / 100) * width)) >= _min else _min
+        self.ph = lambda percentage, _min = 0, height = self.page_height: result if (result := ((percentage / 100) * height)) >= _min else _min
+        
+        self.fw = lambda fraction, _min = 0, width = self.page_width: result if (result := (fraction * width)) >= _min else _min
+        self.fh = lambda fraction, _min = 0, height = self.page_height: result if (result := (fraction * height)) >= _min else _min
+        
+        self.pdw = lambda padding, _min = 0, width = self.page_width: result if (result := (self.get_padded_dimension(width, padding))) >= _min else _min
+        self.pdh = lambda padding, _min = 0, height = self.page_height: result if (result := (self.get_padded_dimension(height, padding))) >= _min else _min
+        
+        self.rw = lambda width, _min = 0, BASE_WIDTH = self.BASE_WIDTH: result if (result := (self.page_width * (0.00001 + (width / BASE_WIDTH)))) >= _min else _min
+        self.rh = lambda height, _min = 0, BASE_HEIGHT = self.BASE_HEIGHT: result if (result := (self.page_height * (0.00001 + (height / BASE_HEIGHT)))) >= _min else _min
+        
+        self.Padding = lambda left, top, right, bottom: ft.Padding(
+            self.rw(left),
+            self.rh(top),
+            self.rw(right),
+            self.rh(bottom)
+        )
+        
+        self.Margin = lambda left, top, right, bottom: ft.Padding(
+            self.rw(left),
+            self.rh(top),
+            self.rw(right),
+            self.rh(bottom)
+        )
+        
+        self.nw = lambda n, _min = 0, BASE_WIDTH = self.BASE_WIDTH: result if (result := (math.floor((self.page_width * n) / BASE_WIDTH))) >= _min else _min
+        self.nh = lambda n, _min = 0, BASE_HEIGHT = self.BASE_HEIGHT: result if (result := (math.floor((self.page_height * n) / BASE_HEIGHT))) >= _min else _min
+        
+        self.rs = lambda side, _min = 0, BASE_WIDTH = self.BASE_WIDTH, BASE_HEIGHT = self.BASE_HEIGHT: result if (result := (((((self.page_width * self.page_height) / (BASE_WIDTH * BASE_HEIGHT)) * (side ** 2)) ** 0.5))) >= _min else _min
+        return
+    
+    def get_padded_dimension(self, dimension: int, padding: int) -> int :
+        return (dimension - (2 * padding))
 
 macro, macro_task = None, None
 
@@ -7,6 +59,7 @@ RANDOM_COMMANDS = []
 COMMANDS = []
 command_list_view, random_command_list_view = None, None
 run_macro_btn, stop_macro_btn, run_btn_container = None, None, None
+cooldown_time_slider, failsafe_mouse_dist_slider, random_cmd_probab_slider = None, None, None
 
 class CommandItem(ft.Row) :
     def __init__(self, command, command_index) :
@@ -62,10 +115,16 @@ class CommandItem(ft.Row) :
     def delete_callback(self, e) :
         global COMMANDS, command_list_view
         
+        _pop_index = self.command_index
         COMMANDS.pop(self.command_index)
         for i, command in enumerate(COMMANDS) :
             command.command_index = i
             continue
+        
+        for j, command in enumerate(COMMANDS[_pop_index : ]) :
+            command.command_index = (j + _pop_index)
+            continue
+        
         command_list_view.controls = COMMANDS
         command_list_view.update()
         return
@@ -124,10 +183,16 @@ class RandomCommandItem(ft.Row) :
     def delete_callback(self, e) :
         global RANDOM_COMMANDS, random_command_list_view
         
+        _pop_index = self.random_command_index
         RANDOM_COMMANDS.pop(self.random_command_index)
         for i, random_command in enumerate(COMMANDS) :
             random_command.random_command_index = i
             continue
+        
+        for j, random_command in enumerate(RANDOM_COMMANDS[_pop_index : ]) :
+            random_command.random_command_index = (j + _pop_index)
+            continue
+        
         random_command_list_view.controls = RANDOM_COMMANDS
         random_command_list_view.update()
         return
@@ -230,25 +295,12 @@ class Macro() :
             
             self.failsafe = True
         return
+    
 
-def main(page: ft.Page):
-    global COMMANDS, RANDOM_COMMANDS, command_list_view, random_command_list_view, run_macro_btn, stop_macro_btn, run_btn_container
+def draw_page(page: ft.Page, rl: ResponsiveLayer, **cache: dict) -> None :
+    global COMMANDS, RANDOM_COMMANDS, command_list_view, random_command_list_view, run_macro_btn, stop_macro_btn, run_btn_container, cooldown_time_slider, failsafe_mouse_dist_slider, random_cmd_probab_slider
     
-    page.title = 'Owo Bot Macro'
-    
-    light_theme = ft.Theme(color_scheme_seed = ft.Colors.AMBER)
-    dark_theme = ft.Theme(color_scheme_seed = ft.Colors.DEEP_ORANGE)
-    
-    page.theme = light_theme
-    page.dark_theme = dark_theme
-    
-    page.theme_mode = ft.ThemeMode.LIGHT
-    
-    page.window.center()
-    page.window.width = 1000
-    page.window.height = 850
-    page.window.icon = '/icon.png'
-    page.update()
+    page.controls.clear()
     
     def change_theme(e) :
         if page.theme_mode == ft.ThemeMode.LIGHT :
@@ -260,23 +312,23 @@ def main(page: ft.Page):
         page.update()
         return
     
-    theme_switch = ft.Switch(thumb_icon = 'light_mode', on_change = change_theme)
+    theme_switch = ft.Switch(thumb_icon = ['light_mode', 'dark_mode'][cache['theme_index']], on_change = change_theme)
+    theme_switch.value = [False, True][cache['theme_index']]
     
     title_area = ft.Column([
-        ft.Text('Owo Bot Macro', size = 32, weight = ft.FontWeight.BOLD, style = ft.TextStyle(decoration = ft.TextDecoration.UNDERLINE), expand = True),
+        ft.Text('Owo Bot Macro', size = rl.nw(32), weight = ft.FontWeight.BOLD, style = ft.TextStyle(decoration = ft.TextDecoration.UNDERLINE), expand = True),
         ft.Text('~ By @typedecker', expand = True)
     ], expand = True)
     header_area = ft.Row([
-        ft.Image(src = 'icon.png', width = 70, height = 70, border_radius = ft.border_radius.all(70)),
+        ft.Image(src = 'icon.png', width = rl.rw(70), height = rl.rh(70), border_radius = ft.border_radius.all(70)),
         title_area,
         theme_switch
     ], expand = True)
     title_container = ft.Container(
         header_area,
-        width = 1000,
-        # height = 100,
-        margin = ft.Margin(10, 10, 10, 10),
-        padding = ft.Padding(5, 5, 5, 5),
+        width = rl.rw(1000),
+        margin = rl.Margin(10, 10, 10, 10),
+        padding = rl.Padding(5, 5, 5, 5),
         alignment = ft.alignment.top_left
     )
     
@@ -305,11 +357,11 @@ def main(page: ft.Page):
         command_area.update()
         return
     
-    command_area_title_label = ft.Text('Commands (In-Order)', size = 18, weight = ft.FontWeight.BOLD, expand = True)
+    command_area_title_label = ft.Text('Commands (In-Order)', size = rl.nw(18), weight = ft.FontWeight.BOLD, expand = True)
     add_cmd_field = ft.TextField(label = 'Add Command', expand = True, visible = False, shift_enter = True, on_submit = done_btn_callback)
     add_cmd_done_btn = ft.IconButton(icon = 'done', alignment = ft.alignment.top_right, visible = False, on_click = done_btn_callback)
     add_cmd_btn = ft.IconButton(icon = 'add', alignment = ft.alignment.top_right, on_click = add_btn_callback)
-    command_list_view = ft.ListView(COMMANDS, spacing = 5, padding = 10, expand = True)
+    command_list_view = ft.ListView([], spacing = 5, padding = 10, expand = True)
     command_area = ft.Column([
         ft.Row([
             command_area_title_label,
@@ -322,10 +374,10 @@ def main(page: ft.Page):
     ])
     command_list_container = ft.Container(
         command_area,
-        width = 400,
-        height = 400,
-        margin = ft.Margin(10, 10, 10, 10),
-        padding = ft.Padding(5, 5, 5, 5),
+        width = rl.rw(400),
+        height = rl.rh(400),
+        margin = rl.Margin(10, 10, 10, 10),
+        padding = rl.Padding(5, 5, 5, 5),
         border = ft.border.all(1, ft.Colors.OUTLINE)
     )
     
@@ -354,11 +406,11 @@ def main(page: ft.Page):
         random_command_area.update()
         return
     
-    random_command_area_title_label = ft.Text('Random Commands', size = 18, weight = ft.FontWeight.BOLD, expand = True)
+    random_command_area_title_label = ft.Text('Random Commands', size = rl.nw(18), weight = ft.FontWeight.BOLD, expand = True)
     add_random_cmd_field = ft.TextField(label = 'Add Random Command', expand = True, visible = False, shift_enter = True, on_submit = random_done_btn_callback)
     add_random_cmd_done_btn = ft.IconButton(icon = 'done', alignment = ft.alignment.top_right, visible = False, on_click = random_done_btn_callback)
     add_random_cmd_btn = ft.IconButton(icon = 'add', alignment = ft.alignment.top_right, on_click = random_add_btn_callback)
-    random_command_list_view = ft.ListView(COMMANDS, spacing = 5, padding = 10, expand = True)
+    random_command_list_view = ft.ListView([], spacing = 5, padding = 10, expand = True)
     random_command_area = ft.Column([
         ft.Row([
             random_command_area_title_label,
@@ -371,10 +423,10 @@ def main(page: ft.Page):
     ])
     random_command_list_container = ft.Container(
         random_command_area,
-        width = 400,
-        height = 400,
-        margin = ft.Margin(10, 10, 10, 10),
-        padding = ft.Padding(5, 5, 5, 5),
+        width = rl.rw(400),
+        height = rl.rh(400),
+        margin = rl.Margin(10, 10, 10, 10),
+        padding = rl.Padding(5, 5, 5, 5),
         border = ft.border.all(1, ft.Colors.OUTLINE)
     )
     
@@ -382,36 +434,34 @@ def main(page: ft.Page):
     list_area = ft.Row([
         command_list_container,
         random_command_list_container
-    ], width = 1000)
+    ], width = rl.rw(1000))
     
     
-    cooldown_time_slider = ft.Slider(5, min = 1, max = 20, divisions = 20, label = '{value}s', expand = True)
-    failsafe_mouse_dist_slider = ft.Slider(100, min = 20, max = 150, divisions = 130, label = '{value}px', expand = True)
-    random_cmd_probab_slider = ft.Slider(40, min = 0, max = 100, divisions = 100, label = '{value}%', expand = True)
+    options = cache['options']
+    cooldown_time_slider = ft.Slider(options[0], min = 1, max = 20, divisions = 20, label = '{value}s', expand = True)
+    failsafe_mouse_dist_slider = ft.Slider(options[1], min = 20, max = 150, divisions = 130, label = '{value}px', expand = True)
+    random_cmd_probab_slider = ft.Slider(options[2], min = 0, max = 100, divisions = 100, label = '{value}%', expand = True)
     
     
     options_area = ft.Column([
         ft.Row([
             ft.Text('Cooldown Time: ', weight = ft.FontWeight.BOLD, style = ft.TextStyle(decoration = ft.TextDecoration.UNDERLINE), expand = True),
-            # ft.Slider(5, min = 1, max = 20, divisions = 20, label = '{value}s', expand = True)
             cooldown_time_slider
         ]),
         ft.Row([
             ft.Text('Failsafe Mouse Distance: ', weight = ft.FontWeight.BOLD, style = ft.TextStyle(decoration = ft.TextDecoration.UNDERLINE), expand = True),
-            # ft.Slider(100, min = 20, max = 150, divisions = 130, label = '{value}px', expand = True)
             failsafe_mouse_dist_slider
         ]),
         ft.Row([
             ft.Text('Random Command Probability: ', weight = ft.FontWeight.BOLD, style = ft.TextStyle(decoration = ft.TextDecoration.UNDERLINE), expand = True),
-            # ft.Slider(40, min = 0, max = 100, divisions = 100, label = '{value}%', expand = True)
             random_cmd_probab_slider
         ])
     ])
     options_container = ft.Container(
         options_area,
-        width = 400,
-        margin = ft.Margin(10, 10, 10, 10),
-        padding = ft.Padding(5, 5, 5, 5),
+        width = rl.rw(400),
+        margin = rl.Margin(10, 10, 10, 10),
+        padding = rl.Padding(5, 5, 5, 5),
         border = ft.border.all(1, ft.Colors.OUTLINE)
     )
     
@@ -461,22 +511,155 @@ def main(page: ft.Page):
             run_macro_btn,
             stop_macro_btn
         ], width = 140),
-        alignment = ft.alignment.bottom_right
+        alignment = ft.alignment.top_left
     )
     
-    page.add(
-        title_container,
-        # command_list_container,
-        list_area,
-        options_container,
-        run_btn_container
-    )
+    responsive_page = ft.ResponsiveRow(controls = [
+        ft.Column([
+            title_container,
+            list_area,
+            options_container,
+            run_btn_container
+        ])
+    ])
     
-    for cmd_name in ['owo b', 'owo h', 'owo sac all', 'owo upgrade duration all'] :
+    page.add(responsive_page)
+    
+    COMMANDS.clear()
+    RANDOM_COMMANDS.clear()
+    for cmd_name in cache['cmd_names'] :
         add_command(cmd_name)
     
-    for cmd_name in ['owo z', 'owo cf 1', 'owo s 1', 'owo cash', 'owo lb all', 'owo wc all', 'owo ws', 'owo tm', 'owo inv'] :
-        add_random_command(cmd_name)
+    for random_cmd_name in cache['random_cmd_names'] :
+        add_random_command(random_cmd_name)
+    return
 
+async def load_cache(page: ft.Page, loading_dialog: ft.AlertDialog) :
+    cmd_names = (await page.client_storage.get_async('commands')) if (await page.client_storage.contains_key_async('commands')) else ['owo b', 'owo h', 'owo sac all', 'owo upgrade duration all']
+    random_cmd_names = (await page.client_storage.get_async('random_commands')) if (await page.client_storage.contains_key_async('random_commands')) else ['owo z', 'owo cf 1', 'owo s 1', 'owo cash', 'owo lb all', 'owo wc all', 'owo ws', 'owo tm', 'owo inv']
+    options = (await page.client_storage.get_async('options')) if (await page.client_storage.contains_key_async('options')) else [5, 100, 40]
+    theme_index = (await page.client_storage.get_async('theme_index')) if (await page.client_storage.contains_key_async('theme_index')) else 0
+    
+    await asyncio.sleep(1)
+    
+    loading_dialog.open = False
+    page.update()
+    return cmd_names, random_cmd_names, options, theme_index
+
+async def save_cache(page: ft.Page, saving_dialog: ft.AlertDialog) :
+    global COMMANDS, RANDOM_COMMANDS, cooldown_time_slider, failsafe_mouse_dist_slider, random_cmd_probab_slider
+    
+    cmd_names = [cmd.command for cmd in COMMANDS]
+    random_cmd_names = [cmd.random_command for cmd in RANDOM_COMMANDS]
+    options = [slider.value for slider in [cooldown_time_slider, failsafe_mouse_dist_slider, random_cmd_probab_slider]]
+    
+    await page.client_storage.set_async('commands', cmd_names)
+    await page.client_storage.set_async('random_commands', random_cmd_names)
+    await page.client_storage.set_async('options', options)
+    await page.client_storage.set_async('theme_index', [ft.ThemeMode.LIGHT, ft.ThemeMode.DARK].index(page.theme_mode))
+    
+    await asyncio.sleep(1)
+    
+    saving_dialog.open = False
+    page.update()
+    
+    page.window.destroy()
+    return
+
+async def main(page: ft.Page):
+    global COMMANDS, RANDOM_COMMANDS, cooldown_time_slider, failsafe_mouse_dist_slider, random_cmd_probab_slider
+    
+    page.title = 'Owo Bot Macro'
+    
+    light_theme = ft.Theme(color_scheme_seed = ft.Colors.ORANGE)
+    dark_theme = ft.Theme(color_scheme_seed = ft.Colors.DEEP_ORANGE)
+    
+    page.theme = light_theme
+    page.dark_theme = dark_theme
+    
+    page.theme_mode = ft.ThemeMode.LIGHT
+    
+    SCREEN_WIDTH, SCREEN_HEIGHT = pyautogui.size()
+    rl: ResponsiveLayer = ResponsiveLayer(page, 1000, 850)
+    
+    if not (page.platform in [ft.PagePlatform.ANDROID, ft.PagePlatform.IOS, ft.PagePlatform.ANDROID_TV]) :
+        page.window.center()
+        page.window.width: int = SCREEN_WIDTH * (1000/2560)
+        page.window.height: int = SCREEN_HEIGHT * (850/1600)
+        page.window.min_width: int = 600
+        page.window.min_height: int = 510
+        page.update()
+        rl.update_dimensions()
+    
+    loading_dialog = ft.AlertDialog(
+        title = ft.Text("Loading Cache"),
+        content = ft.Container(
+            ft.Column([
+                ft.ProgressRing(),
+                ft.Text("Loading cache...")
+            ], horizontal_alignment = ft.CrossAxisAlignment.CENTER, expand = True, alignment = ft.MainAxisAlignment.SPACE_EVENLY),
+            width = 300,
+            height = 200,
+        ),
+        actions = [],
+    )
+    
+    page.overlay.append(loading_dialog)
+    loading_dialog.open = True
+    page.update()
+    
+    cmd_names, random_cmd_names, options, theme_index = await load_cache(page, loading_dialog)
+    page.theme_mode = [ft.ThemeMode.LIGHT, ft.ThemeMode.DARK][theme_index]
+    
+    page.scroll = ft.ScrollMode.AUTO
+    
+    async def handle_window_event(e) -> None :
+        if e.data == "close":
+            saving_dialog = ft.AlertDialog(
+                title = ft.Text("Saving Cache"),
+                content = ft.Container(
+                    ft.Column([
+                        ft.ProgressRing(),
+                        ft.Text("Saving cache...")
+                    ], horizontal_alignment = ft.CrossAxisAlignment.CENTER, expand = True, alignment = ft.MainAxisAlignment.SPACE_EVENLY),
+                    width = 300,
+                    height = 200,
+                ),
+                actions = [],
+            )
+            
+            page.overlay.clear()
+            page.overlay.append(saving_dialog)
+            saving_dialog.open = True
+            page.update()
+            
+            await save_cache(page, saving_dialog)
+        return
+
+    page.window.prevent_close = True
+    page.window.on_event = handle_window_event
+    
+    if not (page.platform in [ft.PagePlatform.ANDROID, ft.PagePlatform.IOS, ft.PagePlatform.ANDROID_TV]) :
+        page.window.center()
+        page.window.width: int = SCREEN_WIDTH * (1000/2560)
+        page.window.height: int = SCREEN_HEIGHT * (850/1600)
+        page.window.min_width: int = 600
+        page.window.min_height: int = 510
+        page.update()
+        rl.update_dimensions()
+    
+    def on_resize(e: ft.WindowResizeEvent) -> None :
+        cmd_names = [cmd.command for cmd in COMMANDS]
+        random_cmd_names = [cmd.random_command for cmd in RANDOM_COMMANDS]
+        options = [slider.value for slider in [cooldown_time_slider, failsafe_mouse_dist_slider, random_cmd_probab_slider]]
+        
+        rl.update_dimensions()
+        draw_page(page, rl, cmd_names = cmd_names, random_cmd_names = random_cmd_names, options = options, theme_index = theme_index)
+        return
+    
+    page.on_resized = on_resize
+    
+    draw_page(page, rl, cmd_names = cmd_names, random_cmd_names = random_cmd_names, options = options, theme_index = theme_index)
+    return
 
 ft.app(main, assets_dir="assets")
